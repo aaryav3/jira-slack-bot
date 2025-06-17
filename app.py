@@ -1,6 +1,9 @@
 from flask import Flask, request, jsonify, Response
 import json
 import slack_message_handler as slack_handler
+import logging
+
+logging.basicConfig(level=logging.INFO)
 
 app = Flask(__name__)
 
@@ -12,6 +15,8 @@ def index():
 
 @app.route('/slack/events', methods=['POST'])
 def slack_events():
+    print(f"Received request: {request.data}")
+    print(f"Headers: {dict(request.headers)}")
     data = json.loads(request.data)
     # Slack sends a challenge request when you register the URL
     if 'challenge' in data:
@@ -29,4 +34,4 @@ def slack_events():
     return response
 
 if __name__ == '__main__':
-    app.run(port=8080)
+    app.run(port=5000)

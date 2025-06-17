@@ -20,7 +20,6 @@ def _remove_command_from_title(text, command):
 
 
 def _respond_bug_command(user_id, text, channel, thread_ts):
-    user_email = slack_helper.get_slack_user_email(user_id)
     bug_title = _remove_command_from_title(text, "!bug")
     if bug_title == "":
         response = (
@@ -28,28 +27,35 @@ def _respond_bug_command(user_id, text, channel, thread_ts):
             "title`")
         _post_message(channel, thread_ts, response)
         return
-    created_issue = jira_helper.create_bug(bug_title, user_email, channel, thread_ts)
-    issue_link = created_issue.permalink()
-    response = f"Your new bug ticket has been created here: {issue_link}"
-    _post_message(channel, thread_ts, response)
-
+    
+    try:
+        # Now using user_id directly instead of trying to get email
+        created_issue = jira_helper.create_bug(bug_title, user_id, channel, thread_ts)
+        issue_link = created_issue.permalink()
+        response = f"✅ Your new bug ticket has been created here: {issue_link}"
+        _post_message(channel, thread_ts, response)
+    except Exception as e:
+        error_msg = f"❌ Failed to create bug ticket: {str(e)}"
+        _post_message(channel, thread_ts, error_msg)
 
 def _respond_story_command(user_id, text, channel, thread_ts):
-    user_email = slack_helper.get_slack_user_email(user_id)
     story_title = _remove_command_from_title(text, "!story")
     if story_title == "":
         response = ("Please provide a title for your story ticket! A sample command looks like this: `!story This "
                     "is a ticket title`")
         _post_message(channel, thread_ts, response)
         return
-    created_issue = jira_helper.create_story(story_title, user_email, channel, thread_ts)
-    issue_link = created_issue.permalink()
-    response = f"Your new story ticket has been created here: {issue_link}"
-    _post_message(channel, thread_ts, response)
-
+    
+    try:
+        created_issue = jira_helper.create_story(story_title, user_id, channel, thread_ts)
+        issue_link = created_issue.permalink()
+        response = f"✅ Your new story ticket has been created here: {issue_link}"
+        _post_message(channel, thread_ts, response)
+    except Exception as e:
+        error_msg = f"❌ Failed to create story ticket: {str(e)}"
+        _post_message(channel, thread_ts, error_msg)
 
 def _respond_task_command(user_id, text, channel, thread_ts):
-    user_email = slack_helper.get_slack_user_email(user_id)
     task_title = _remove_command_from_title(text, "!task")
     if task_title == "":
         response = (
@@ -57,14 +63,17 @@ def _respond_task_command(user_id, text, channel, thread_ts):
             "`!task This is a ticket title`")
         _post_message(channel, thread_ts, response)
         return
-    created_issue = jira_helper.create_task(task_title, user_email, channel, thread_ts)
-    issue_link = created_issue.permalink()
-    response = f"Your new task ticket has been created here: {issue_link}"
-    _post_message(channel, thread_ts, response)
-
+    
+    try:
+        created_issue = jira_helper.create_task(task_title, user_id, channel, thread_ts)
+        issue_link = created_issue.permalink()
+        response = f"✅ Your new task ticket has been created here: {issue_link}"
+        _post_message(channel, thread_ts, response)
+    except Exception as e:
+        error_msg = f"❌ Failed to create task ticket: {str(e)}"
+        _post_message(channel, thread_ts, error_msg)
 
 def _respond_epic_command(user_id, text, channel, thread_ts):
-    user_email = slack_helper.get_slack_user_email(user_id)
     epic_title = _remove_command_from_title(text, "!epic")
     if epic_title == "":
         response = (
@@ -72,10 +81,15 @@ def _respond_epic_command(user_id, text, channel, thread_ts):
             "`!epic This is a ticket title`")
         _post_message(channel, thread_ts, response)
         return
-    created_issue = jira_helper.create_epic(epic_title, user_email, channel, thread_ts)
-    issue_link = created_issue.permalink()
-    response = f"Your new epic ticket has been created here: {issue_link}"
-    _post_message(channel, thread_ts, response)
+    
+    try:
+        created_issue = jira_helper.create_epic(epic_title, user_id, channel, thread_ts)
+        issue_link = created_issue.permalink()
+        response = f"✅ Your new epic ticket has been created here: {issue_link}"
+        _post_message(channel, thread_ts, response)
+    except Exception as e:
+        error_msg = f"❌ Failed to create epic ticket: {str(e)}"
+        _post_message(channel, thread_ts, error_msg)
 
 
 def _respond_priority_command(channel, thread_ts):
