@@ -2,7 +2,7 @@
 .idea/
 *.iml
 *.iws
-*.env
+.env
 
 # Ignore IntelliJ IDEA project files
 *.ipr
