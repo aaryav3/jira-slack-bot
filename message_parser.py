@@ -1,8 +1,11 @@
 import re
 from typing import Dict, List, Optional
 
+import re
+from typing import Dict, List, Optional, Any
+
 class MessageParser:
-    """Parse Slack messages to extract bug report information"""
+    """Parse Slack messages to extract bug report information including attachments"""
     
     # Environment mapping
     ENVIRONMENT_KEYWORDS = {
@@ -29,13 +32,22 @@ class MessageParser:
         'other': 'Other'
     }
     
+    # Supported attachment types for Jira
+    SUPPORTED_IMAGE_TYPES = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'svg', 'webp'}
+    SUPPORTED_VIDEO_TYPES = {'mp4', 'mov', 'avi', 'mkv', 'webm', 'flv'}
+    SUPPORTED_DOCUMENT_TYPES = {'pdf', 'doc', 'docx', 'txt', 'csv', 'xlsx', 'xls'}
+    
     DEFAULT_ENVIRONMENT = 'Prod'
     DEFAULT_PRODUCT = 'Clientell AI'
     
     @classmethod
-    def parse_message(cls, text: str) -> Dict:
+    def parse_message(cls, text: str, slack_event: Dict = None) -> Dict:
         """
-        Parse message content to extract all bug report information
+        Parse message content to extract all bug report information including attachments
+        
+        Args:
+            text: Message text content
+            slack_event: Full Slack event data (contains file information)
         
         Returns:
             Dict containing:
@@ -44,12 +56,16 @@ class MessageParser:
             - environment: Detected environment 
             - product: Detected product
             - urls: Detected URLs (share_urls, chat_urls)
+            - attachments: File attachments (files, images, videos, documents)
         """
         if not text:
-            return cls._empty_result()
+            text = ""
         
-        # Extract URLs first
+        # Extract URLs from text
         urls = cls.extract_urls(text)
+        
+        # Extract attachments from Slack event
+        attachments = cls.extract_attachments(slack_event) if slack_event else cls._empty_attachments()
         
         # Detect environment and product
         environment = cls.detect_environment(text)
@@ -58,13 +74,179 @@ class MessageParser:
         # Split title and description
         title, description = cls.split_title_description(text)
         
+        # If we have attachments but no text, create a meaningful title
+        if not text.strip() and attachments['files']:
+            title = f"Bug report with {len(attachments['files'])} attachment(s)"
+        
         return {
             'title': title,
             'description': description,
             'environment': environment,
             'product': product,
             'urls': urls,
+            'attachments': attachments,
             'original_text': text
+        }
+    
+    @classmethod
+    def extract_attachments(cls, slack_event: Dict) -> Dict[str, List[Dict]]:
+        """
+        Extract attachment information from Slack event
+        
+        Args:
+            slack_event: The full Slack event containing file information
+            
+        Returns:
+            Dict with categorized attachments:
+            - files: All files with metadata
+            - images: Image files only
+            - videos: Video files only  
+            - documents: Document files only
+        """
+        if not slack_event:
+            return cls._empty_attachments()
+        
+        files = slack_event.get('files', [])
+        if not files:
+            return cls._empty_attachments()
+        
+        all_files = []
+        images = []
+        videos = []
+        documents = []
+        
+        for file_info in files:
+            # Extract file metadata
+            file_data = {
+                'id': file_info.get('id'),
+                'name': file_info.get('name', 'unknown'),
+                'title': file_info.get('title', ''),
+                'mimetype': file_info.get('mimetype', ''),
+                'filetype': file_info.get('filetype', '').lower(),
+                'size': file_info.get('size', 0),
+                'url_private': file_info.get('url_private', ''),
+                'url_private_download': file_info.get('url_private_download', ''),
+                'permalink': file_info.get('permalink', ''),
+                'permalink_public': file_info.get('permalink_public', ''),
+                'thumb_url': file_info.get('thumb_360', file_info.get('thumb_160', '')),
+                'is_external': file_info.get('is_external', False),
+                'external_type': file_info.get('external_type', ''),
+                'external_url': file_info.get('external_url', ''),
+                'created': file_info.get('created', 0),
+                'user': file_info.get('user', ''),
+                'username': file_info.get('username', ''),
+                'channels': file_info.get('channels', []),
+                'is_public': file_info.get('is_public', False)
+            }
+            
+            all_files.append(file_data)
+            
+            # Categorize by file type
+            filetype = file_data['filetype']
+            
+            if filetype in cls.SUPPORTED_IMAGE_TYPES:
+                images.append(file_data)
+            elif filetype in cls.SUPPORTED_VIDEO_TYPES:
+                videos.append(file_data)
+            elif filetype in cls.SUPPORTED_DOCUMENT_TYPES:
+                documents.append(file_data)
+        
+        return {
+            'files': all_files,
+            'images': images,
+            'videos': videos,
+            'documents': documents,
+            'count': len(all_files)
+        }
+    
+    @classmethod
+    def get_attachment_summary(cls, attachments: Dict) -> str:
+        """
+        Generate a summary string for attachments
+        
+        Args:
+            attachments: Attachments dict from extract_attachments
+            
+        Returns:
+            Human readable summary string
+        """
+        if not attachments or not attachments.get('files'):
+            return "No attachments"
+        
+        total = attachments['count']
+        images = len(attachments['images'])
+        videos = len(attachments['videos']) 
+        documents = len(attachments['documents'])
+        other = total - images - videos - documents
+        
+        parts = []
+        if images > 0:
+            parts.append(f"{images} image{'s' if images != 1 else ''}")
+        if videos > 0:
+            parts.append(f"{videos} video{'s' if videos != 1 else ''}")
+        if documents > 0:
+            parts.append(f"{documents} document{'s' if documents != 1 else ''}")
+        if other > 0:
+            parts.append(f"{other} other file{'s' if other != 1 else ''}")
+        
+        return f"{total} attachment{'s' if total != 1 else ''}: " + ", ".join(parts)
+    
+    @classmethod
+    def validate_attachment_for_jira(cls, file_data: Dict) -> Dict[str, Any]:
+        """
+        Validate if attachment can be uploaded to Jira
+        
+        Args:
+            file_data: Single file data dict
+            
+        Returns:
+            Dict with validation results:
+            - valid: bool
+            - reason: str (if not valid)
+            - jira_compatible: bool
+            - size_ok: bool
+            - type_supported: bool
+        """
+        # Jira attachment limits (these are typical - adjust based on your Jira config)
+        MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+        
+        size_ok = file_data.get('size', 0) <= MAX_FILE_SIZE
+        filetype = file_data.get('filetype', '').lower()
+        
+        # Check if file type is supported
+        type_supported = (
+            filetype in cls.SUPPORTED_IMAGE_TYPES or
+            filetype in cls.SUPPORTED_VIDEO_TYPES or
+            filetype in cls.SUPPORTED_DOCUMENT_TYPES
+        )
+        
+        # Check if file is accessible (not external or has proper URLs)
+        has_download_url = bool(
+            file_data.get('url_private_download') or 
+            file_data.get('url_private') or
+            file_data.get('external_url')
+        )
+        
+        valid = size_ok and type_supported and has_download_url
+        
+        reasons = []
+        if not size_ok:
+            reasons.append(f"File too large ({file_data.get('size', 0)} bytes > {MAX_FILE_SIZE})")
+        if not type_supported:
+            reasons.append(f"Unsupported file type: {filetype}")
+        if not has_download_url:
+            reasons.append("No accessible download URL")
+        
+        return {
+            'valid': valid,
+            'reason': "; ".join(reasons) if reasons else "File is valid for Jira upload",
+            'jira_compatible': valid,
+            'size_ok': size_ok,
+            'type_supported': type_supported,
+            'has_download_url': has_download_url,
+            'file_name': file_data.get('name', 'unknown'),
+            'file_size': file_data.get('size', 0),
+            'file_type': filetype
         }
     
     @classmethod
@@ -207,26 +389,68 @@ class MessageParser:
             'environment': cls.DEFAULT_ENVIRONMENT,
             'product': cls.DEFAULT_PRODUCT,
             'urls': {'share_urls': [], 'chat_urls': []},
+            'attachments': cls._empty_attachments(),
             'original_text': ''
+        }
+    
+    @classmethod
+    def _empty_attachments(cls) -> Dict:
+        """Return empty attachments structure"""
+        return {
+            'files': [],
+            'images': [],
+            'videos': [],
+            'documents': [],
+            'count': 0
         }
 
 # Test the parser
 if __name__ == "__main__":
-    # Test cases
+    # Test cases including file attachments
     test_messages = [
-        "Login not working in prod environment https://app.clientell.ai/share/123-456",
-        "The dataloader is crashing. Here's the chat: https://app.clientell.ai/chat/abc-def", 
-        "Clientell AI dashboard showing wrong data in staging",
-        "This is a very long message that exceeds the 255 character limit. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. And this should be in the description part.",
-        "Short bug. And this is the description."
+        ("Login not working in prod environment https://app.clientell.ai/share/123-456", None),
+        ("The dataloader is crashing. Here's the chat: https://app.clientell.ai/chat/abc-def", None),
+        ("Screenshot attached showing the error", {
+            'files': [{
+                'id': 'F123456',
+                'name': 'error_screenshot.png',
+                'title': 'Error Screenshot',
+                'mimetype': 'image/png',
+                'filetype': 'png',
+                'size': 1024000,
+                'url_private': 'https://files.slack.com/files-pri/T123/F123456/error_screenshot.png',
+                'url_private_download': 'https://files.slack.com/files-pri/T123/F123456/download/error_screenshot.png',
+                'permalink': 'https://clientell.slack.com/files/U123/F123456/error_screenshot.png',
+                'thumb_360': 'https://files.slack.com/files-tmb/T123/F123456/error_screenshot_360.png',
+                'created': 1640995200,
+                'user': 'U123456',
+                'is_public': False
+            }]
+        })
     ]
     
-    for msg in test_messages:
-        result = MessageParser.parse_message(msg)
-        print(f"Message: {msg[:50]}...")
+    print("=" * 80)
+    print("MESSAGE PARSER TESTS WITH ATTACHMENTS")
+    print("=" * 80)
+    
+    for i, (msg, slack_event) in enumerate(test_messages, 1):
+        print(f"\n--- Test Case {i} ---")
+        result = MessageParser.parse_message(msg, slack_event)
+        
+        print(f"Message: {msg}")
         print(f"Title: {result['title']}")
-        print(f"Description: {result['description'][:50]}...")
+        print(f"Description: {result['description'][:50]}{'...' if len(result['description']) > 50 else ''}")
         print(f"Environment: {result['environment']}")
         print(f"Product: {result['product']}")
         print(f"URLs: {result['urls']}")
+        print(f"Attachments: {MessageParser.get_attachment_summary(result['attachments'])}")
+        
+        # Show attachment details if present
+        if result['attachments']['files']:
+            print("Attachment Details:")
+            for file_data in result['attachments']['files']:
+                validation = MessageParser.validate_attachment_for_jira(file_data)
+                print(f"  - {file_data['name']} ({file_data['filetype']}, {file_data['size']} bytes)")
+                print(f"    Jira Compatible: {validation['jira_compatible']} - {validation['reason']}")
+        
         print("-" * 80)

@@ -63,12 +63,19 @@ def slack_events():
             print(f"🎯 Processing event type: {event_type}")
         
             if event_type == 'message':
-                # Handle message events (including auto-detection)
-                if 'subtype' not in event:  # Skip bot messages and other subtypes
-                    print(f"💬 Processing message event")
+                # Handle message events (including auto-detection and file_share)
+                subtype = event.get('subtype')
+                
+                if subtype is None:
+                    # Regular message without subtype
+                    print(f"💬 Processing regular message event")
                     slack_handler.handle_message(event)
+                elif subtype == 'file_share':
+                    # Handle file share messages - NEW ADDITION
+                    print(f"📎 Processing file_share message event")
+                    slack_handler.handle_message(event)  # Pass to handler with file processing
                 else:
-                    print(f"⏭️ Skipping message with subtype: {event.get('subtype')}")
+                    print(f"⏭️ Skipping message with subtype: {subtype}")
                     
             elif event_type == 'reaction_added':
                 # Handle emoji reactions for confirmations - THIS IS THE KEY FIX
@@ -102,7 +109,7 @@ def health_check():
     return jsonify({
         'status': 'healthy',
         'version': '2.0-instant-reactions',
-        'features': ['auto_bug_detection', 'instant_reactions', 'legacy_commands', 'url_validation'],
+        'features': ['auto_bug_detection', 'instant_reactions', 'legacy_commands', 'url_validation', 'file_attachments'],
         'pending_confirmations': len(slack_helper.pending_confirmations),
         'pending_url_requests': len(slack_helper.pending_url_requests)
     })
@@ -140,6 +147,7 @@ def test_parser():
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
 @app.route('/debug/parse-message', methods=['POST'])
 def debug_parse_message():
     """Test message parsing with detailed output"""
@@ -161,9 +169,11 @@ def debug_parse_message():
             'has_product': bool(parsed_data.get('product')),
             'has_description': bool(parsed_data.get('description')),
             'has_urls': bool(parsed_data.get('urls')),
+            'has_attachments': bool(parsed_data.get('attachments')),  # NEW
             'urls_structure_valid': isinstance(parsed_data.get('urls'), dict) and 
                                   'share_urls' in parsed_data.get('urls', {}) and
-                                  'chat_urls' in parsed_data.get('urls', {})
+                                  'chat_urls' in parsed_data.get('urls', {}),
+            'attachments_structure_valid': isinstance(parsed_data.get('attachments'), dict)  # NEW
         }
         
         return jsonify({
@@ -177,7 +187,8 @@ def debug_parse_message():
 **Environment:** {parsed_data.get('environment', 'N/A')}
 **Product:** {parsed_data.get('product', 'N/A')}
 **Description:** {parsed_data.get('description', '(No additional description)')}
-**URLs:** {len(parsed_data.get('urls', {}).get('share_urls', []))} share, {len(parsed_data.get('urls', {}).get('chat_urls', []))} chat"""
+**URLs:** {len(parsed_data.get('urls', {}).get('share_urls', []))} share, {len(parsed_data.get('urls', {}).get('chat_urls', []))} chat
+**Attachments:** {len(parsed_data.get('attachments', {}).get('files', []))} files"""
         })
         
     except Exception as e:
@@ -192,6 +203,7 @@ if __name__ == '__main__':
     print("  ⚡ INSTANT emoji confirmation system")
     print("  🎯 Smart environment/product detection") 
     print("  🔗 URL validation and conversion")
+    print("  📎 File attachment processing")  # NEW
     print("  🤖 Legacy command support")
     print("  👁️ Thread monitoring")
     print()
@@ -200,5 +212,5 @@ if __name__ == '__main__':
     print("  🔍 /debug/pending - Pending requests")
     print("  🧪 /debug/test-parser?message=test - Test message parsing")
     print()
-    print("Ready to process reactions instantly! 🎉")
+    print("Ready to process reactions and attachments instantly! 🎉")
     app.run(port=5000, debug=True)

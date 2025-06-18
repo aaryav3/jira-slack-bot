@@ -109,6 +109,9 @@ def create_auto_bug(parsed_data, slack_user_id, channel_id, message_ts, share_ur
 def _create_ticket(issue_title, slack_user_id, channel_id, thread_ts, ticket_type):
     """Create ticket using your own Jira credentials, mention Slack user in description"""
     
+    # Clean the title by removing newlines
+    clean_title = issue_title.replace('\n', ' ').strip()
+    
     slack_thread_link = f"{EnvironmentSettings.get_slack_server()}/archives/{channel_id}/p{thread_ts.replace('.', '')}"
     parent_message = slack_helper.get_parent_message(channel_id, thread_ts) if thread_ts else "No thread message"
     stripped_command = ticket_type.lower()
@@ -140,7 +143,7 @@ def _create_ticket(issue_title, slack_user_id, channel_id, thread_ts, ticket_typ
     # Create issue data with the CORRECT custom field values from your debug output
     issue_data = {
         'project': EnvironmentSettings.get_jira_project_key(),
-        'summary': issue_title,
+        'summary': clean_title,  # Use the cleaned title
         'description': description,
         'issuetype': {'name': ticket_type},
         # Environment - single option field
