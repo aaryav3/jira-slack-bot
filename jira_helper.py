@@ -21,6 +21,90 @@ def create_task(issue_title, slack_user_id, channel_id, thread_ts):
 
 def create_epic(issue_title, slack_user_id, channel_id, thread_ts):
     return _create_ticket(issue_title, slack_user_id, channel_id, thread_ts, ticket_type="Epic")
+def create_auto_bug(parsed_data, slack_user_id, channel_id, message_ts, share_url=None):
+    """Create a bug ticket from auto-detected data with full Slack context"""
+    try:
+        # Extract title from parsed data
+        title = parsed_data.get('title', 'Bug Report')
+        
+        # Build enhanced description with auto-detected context
+        slack_thread_link = f"{EnvironmentSettings.get_slack_server()}/archives/{channel_id}/p{message_ts.replace('.', '')}"
+        
+        # Get the original message content for context
+        original_text = parsed_data.get('original_text', '')
+        description_content = parsed_data.get('description', '')
+        environment = parsed_data.get('environment', 'Prod')
+        product = parsed_data.get('product', 'Clientell AI')
+        
+        # Build comprehensive description
+        description_parts = [
+            f"{{panel:borderStyle=dashed|borderColor=#00b|titleBGColor=#d2e0fc|bgColor=#f0f4ff}}"
+            f"This ticket was automatically created from Slack message: {slack_thread_link}"
+            f"{{panel}}",
+            "",
+            f"*Reported by:* <@{slack_user_id}>",
+            f"*Auto-detected Environment:* {environment}",
+            f"*Auto-detected Product:* {product}",
+            ""
+        ]
+        
+        # # Add share URL if provided
+        # if share_url:
+        #     description_parts.extend([
+        #         f"*Share Chat URL:* {share_url}",
+        #         ""
+        #     ])
+        
+        # Add original message context
+        description_parts.extend([
+            "*Original Slack Message:*",
+            f"```",
+            original_text,
+            f"```"
+        ])
+        
+        # Add parsed description if different from original
+        if description_content and description_content != original_text:
+            description_parts.extend([
+                "",
+                "*Additional Context:*",
+                description_content
+            ])
+        
+        final_description = "\n".join(description_parts)
+        
+        # Create the issue with enhanced description
+        try:
+            if share_url:
+                new_issue = jira_client.create_issue(
+                    project=EnvironmentSettings.get_jira_project_key(),
+                    summary=title,
+                    description=final_description,
+                    issuetype={'name': 'Bug'},
+                    customfield_10036=environment,  # Environment field
+                    customfield_10037=[{'value': product}],  # Product field
+                    customfield_10078=share_url  # Share Chat URL field
+                )
+            else:
+                new_issue = jira_client.create_issue(
+                    project=EnvironmentSettings.get_jira_project_key(),
+                    summary=title,
+                    description=final_description,
+                    issuetype={'name': 'Bug'},
+                )
+            
+            print(f"✅ Auto-bug ticket created with full context: {new_issue.key}")
+            return new_issue
+            
+        except Exception as jira_error:
+            print(f"⚠️ Jira creation with custom fields failed: {jira_error}")
+            # Fallback to basic creation
+            return create_bug(title, slack_user_id, channel_id, message_ts)
+        
+    except Exception as e:
+        print(f"❌ Error in create_auto_bug: {e}")
+        # Fallback to basic creation
+        return create_bug(title, slack_user_id, channel_id, message_ts)
 
 def _create_ticket(issue_title, slack_user_id, channel_id, thread_ts, ticket_type):
     """Create ticket using your own Jira credentials, mention Slack user in description"""
@@ -97,26 +181,26 @@ def _create_ticket(issue_title, slack_user_id, channel_id, thread_ts, ticket_typ
 #         print(f"Error finding Jira user: {e}")
 #     return None
 
-def get_assigned_tasks(user_email) -> list[Dict[str, str]]:
-    try:
-        user_email = _get_jira_user_id_by_email(user_email)
-        issues = jira_client.search_issues(f"assignee = {user_email} AND status IN ('Development', 'Code Complete', "
-                                           f"'Blocked')")
-        tasks = []
-        for issue in issues:
-            task = {
-                'title': issue.fields.summary,
-                'ticket_id': issue.key,
-                'url': f"{EnvironmentSettings.get_jira_api_server()}/browse/{issue.key}",
-                'state': issue.fields.status.name,
-                'size': issue.fields.customfield_10428,
-                'priority': issue.fields.priority.name
-            }
-            tasks.append(task)
-        return tasks
-    except Exception as e:
-        print(f"Error finding assigned tasks: {e}")
-    return None
+# def get_assigned_tasks(user_email) -> list[Dict[str, str]]:
+#     try:
+#         user_email = _get_jira_user_id_by_email(user_email)
+#         issues = jira_client.search_issues(f"assignee = {user_email} AND status IN ('Development', 'Code Complete', "
+#                                            f"'Blocked')")
+#         tasks = []
+#         for issue in issues:
+#             task = {
+#                 'title': issue.fields.summary,
+#                 'ticket_id': issue.key,
+#                 'url': f"{EnvironmentSettings.get_jira_api_server()}/browse/{issue.key}",
+#                 'state': issue.fields.status.name,
+#                 'size': issue.fields.customfield_10428,
+#                 'priority': issue.fields.priority.name
+#             }
+#             tasks.append(task)
+#         return tasks
+#     except Exception as e:
+#         print(f"Error finding assigned tasks: {e}")
+#     return None
 
 
 def get_story_size_priority(ticket_number):
